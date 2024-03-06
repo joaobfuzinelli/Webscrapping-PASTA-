@@ -91,7 +91,26 @@ if __name__ == "__main__":
 
             for url_to_check in links_adicionados:
                 try:
-                    download_zip(url_to_check, headers, extract_folder)
+                    zip_path = download_zip(url_to_check, headers, extract_folder)
+
+                    if zip_path:
+                        # Cria um dicionário consolidado para armazenar todos os dados
+                        consolidated_data = {}
+
+                        # Lê todas as planilhas Excel dentro do arquivo ZIP
+                        with pd.ExcelFile(zip_path) as xls:
+                            for sheet_name in xls.sheet_names:
+                                df_data = read_excel_to_dict(xls.parse(sheet_name))
+
+                                # Adiciona os dados ao dicionário consolidado
+                                if sheet_name not in consolidated_data:
+                                    consolidated_data[sheet_name] = []
+
+                                consolidated_data[sheet_name].extend(df_data)
+
+                        # Imprime o dicionário consolidado
+                        print("Dicionário Consolidado:")
+                        print(consolidated_data)
 
                 except requests.exceptions.RequestException as e:
                     print(f"Erro na requisição: {e}")
