@@ -1,120 +1,120 @@
-import zipfile
-import pandas as pd
-import os
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin
-from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import urljoin
+import os
 import time
-import sqlite3
 import json
+from urllib3.exceptions import InsecureRequestWarning
+import pandas as pd
 
-# Desativar os avisos relacionados à solicitação não segura
+# Desativa os avisos relacionados à solicitação não segura
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-def download_zip(url_to_check, headers, download_folder):
+def download_zip(url_to_check, headers):
+    try:
+        response = requests.get(url_to_check, headers=headers, verify=False, stream=True)
+        response.raise_for_status()  # Verifica se houve algum erro na resposta
+
+        # Extrai o nome do arquivo do URL
+        filename = url_to_check.split("/")[-1]
+
+        # Define o caminho local para salvar o arquivo
+        local_path = os.path.join("downloads", filename)
+
+        # Cria o diretório de downloads, se não existir
+        os.makedirs("downloads", exist_ok=True)
+
+        # Salva o conteúdo do arquivo ZIP localmente
+        with open(local_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    file.write(chunk)
+
+        print(f"Arquivo baixado com sucesso: {local_path}")
+
+        # Retorna o caminho local do arquivo ZIP baixado
+        return local_path
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na requisição para {url_to_check}: {e}")
+        return None
+
+def extract_links(url_to_check, headers, keyword="Dados_abertos_Nao_Previdenciario"):
     try:
         response = requests.get(url_to_check, headers=headers, verify=False)
         response.raise_for_status()  # Verifica se houve algum erro na resposta
     except requests.exceptions.RequestException as e:
         print(f"Falha na requisição para {url_to_check}: {e}")
-        return
+        return []
 
     if response.status_code == 200:
-        # Obtém o nome do arquivo do cabeçalho de resposta
-        content_disposition = response.headers.get('content-disposition')
-        if content_disposition and 'attachment' in content_disposition:
-            filename = content_disposition.split("filename=")[1].strip('";')
-        else:
-            # Se o cabeçalho de resposta não contiver o nome do arquivo, gera um nome com base na URL
-            filename = os.path.basename(url_to_check)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = []
 
-        # Caminho completo para salvar o arquivo ZIP
-        file_path = os.path.join(download_folder, filename)
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if keyword in href:
+                links.append(urljoin(url_to_check, href))
 
-        # Salva o arquivo ZIP
-        with open(file_path, 'wb') as f:
-            f.write(response.content)
-
-        print(f"Arquivo ZIP baixado: {file_path}")
+        return links
     else:
-        print(f"Falha ao baixar o arquivo ZIP. Status code: {response.status_code}")
+        return []
 
-def extract_links(url_to_check, headers):
-    # Código para extrair links de uma página web
-    pass
-
-def fix_url(base_url, url):
-    # Adicione aqui o código para corrigir URLs, se necessário
-    return urljoin(base_url, url)
-
-def create_table_if_not_exists(connection):
-    # Cria a tabela se ela não existir
-    cursor = connection.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS dados_tabela (
-            Coluna1 TEXT,
-            Coluna2 INTEGER,
-            Coluna3 TEXT
-        )
-    ''')
-    connection.commit()
-
-def insert_data_into_table(connection, data):
-    # Insere os dados na tabela
-    cursor = connection.cursor()
-    cursor.executemany('INSERT INTO dados_tabela (Coluna1, Coluna2, Coluna3) VALUES (?, ?, ?)', data)
-    connection.commit()
-
-def read_config_from_json(file_path='config.json'):
-    # Leitura das configurações do JSON
-    with open(file_path, 'r') as f:
-        return json.load(f)
+def read_excel_to_dict(file_path):
+    # Utiliza pandas para ler o arquivo Excel e retorna um dicionário
+    df = pd.read_excel(file_path)
+    return df.to_dict(orient='records')
 
 if __name__ == "__main__":
-    # Leitura das configurações do JSON
-    config = read_config_from_json()
+    with open('config.json') as f:
+        dados_arquivo = json.load(f)
 
-    # Conexão com o banco de dados
-    if config['database']['type'] == 'sqlite':
-        db_connection = sqlite3.connect(config['database']['name'])
-    else:
-        # Adapte aqui para outros tipos de banco de dados
-        pass
+    base_url = dados_arquivo['url']
+    url_list = [base_url]
+    headers = dados_arquivo['headers']
 
-    # Garante que a pasta de download exista ou cria se não existir
-    os.makedirs(config['download_folder'], exist_ok=True)
+    # Conjunto para armazenar as URLs já verificadas
+    checked_urls = set()
+
+    # Dicionário consolidado para armazenar todos os dados
+    consolidated_data = {}
 
     try:
         while True:
             novas_pastas = set()
 
             for url_to_check in url_list:
-                novas_pastas.update(extract_links(url_to_check, config['headers']))
+                novas_pastas.update(extract_links(url_to_check, headers))
 
             links_adicionados = novas_pastas - set(url_list)
 
             if links_adicionados:
                 print("Novas pastas adicionadas:")
                 for link_adicionado in links_adicionados:
-                    full_url = fix_url(config['url'], link_adicionado)
-                    url_list.append(full_url)
-                    print(full_url)
+                    url_list.append(link_adicionado)
+                    print(link_adicionado)
 
-                    # Extraia e salve o conteúdo do arquivo ZIP
-                    download_zip(full_url, config['headers'], config['download_folder'])
+            for url_to_check in links_adicionados:
+                try:
+                    zip_path = download_zip(url_to_check, headers)
 
-                    # Leitura do arquivo Excel e inserção no banco de dados
-                    excel_df = pd.read_excel(os.path.join(config['extract_folder'], "Dados_abertos_Nao_Previdenciario.xlsx"))
-                    data_to_insert = [tuple(row) for row in excel_df.values]
-                    create_table_if_not_exists(db_connection)
-                    insert_data_into_table(db_connection, data_to_insert)
+                    if zip_path:
+                        # Lê todas as planilhas Excel dentro do arquivo ZIP
+                        with pd.ExcelFile(zip_path) as xls:
+                            for sheet_name in xls.sheet_names:
+                                df_data = read_excel_to_dict(xls.parse(sheet_name))
 
-            # Aguarde antes da próxima verificação (por exemplo, 1 hora)
+                                # Adiciona os dados ao dicionário consolidado
+                                if sheet_name not in consolidated_data:
+                                    consolidated_data[sheet_name] = []
+
+                                consolidated_data[sheet_name].extend(df_data)
+
+                except requests.exceptions.RequestException as e:
+                    print(f"Erro na requisição: {e}")
+
+            # Aguardar antes da próxima verificação (por exemplo, 1 hora)
             time.sleep(3600)
 
     except KeyboardInterrupt:
         print("Script interrompido manualmente.")
-
-    # Fecha a conexão com o banco de dados após a conclusão
-    db_connection.close()
