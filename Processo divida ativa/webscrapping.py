@@ -10,7 +10,7 @@ import pandas as pd
 # Desativa os avisos relacionados à solicitação não segura
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-def download_zip(url_to_check, headers):
+def download_zip(url_to_check, headers, extract_folder):
     try:
         response = requests.get(url_to_check, headers=headers, verify=False, stream=True)
         response.raise_for_status()  # Verifica se houve algum erro na resposta
@@ -18,11 +18,11 @@ def download_zip(url_to_check, headers):
         # Extrai o nome do arquivo do URL
         filename = url_to_check.split("/")[-1]
 
-        # Define o caminho local para salvar o arquivo
-        local_path = os.path.join("downloads", filename)
+        # Define o caminho local para salvar o arquivo ZIP
+        local_path = os.path.join(extract_folder, filename)
 
         # Cria o diretório de downloads, se não existir
-        os.makedirs("downloads", exist_ok=True)
+        os.makedirs(extract_folder, exist_ok=True)
 
         # Salva o conteúdo do arquivo ZIP localmente
         with open(local_path, 'wb') as file:
@@ -72,12 +72,7 @@ if __name__ == "__main__":
     base_url = dados_arquivo['url']
     url_list = [base_url]
     headers = dados_arquivo['headers']
-
-    # Conjunto para armazenar as URLs já verificadas
-    checked_urls = set()
-
-    # Dicionário consolidado para armazenar todos os dados
-    consolidated_data = {}
+    extract_folder = dados_arquivo['extract_folder']
 
     try:
         while True:
@@ -96,19 +91,7 @@ if __name__ == "__main__":
 
             for url_to_check in links_adicionados:
                 try:
-                    zip_path = download_zip(url_to_check, headers)
-
-                    if zip_path:
-                        # Lê todas as planilhas Excel dentro do arquivo ZIP
-                        with pd.ExcelFile(zip_path) as xls:
-                            for sheet_name in xls.sheet_names:
-                                df_data = read_excel_to_dict(xls.parse(sheet_name))
-
-                                # Adiciona os dados ao dicionário consolidado
-                                if sheet_name not in consolidated_data:
-                                    consolidated_data[sheet_name] = []
-
-                                consolidated_data[sheet_name].extend(df_data)
+                    download_zip(url_to_check, headers, extract_folder)
 
                 except requests.exceptions.RequestException as e:
                     print(f"Erro na requisição: {e}")
