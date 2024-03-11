@@ -1,11 +1,10 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 import os
-import time
+import requests
 import json
 from urllib3.exceptions import InsecureRequestWarning
-import pandas as pd
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
+import re
 
 # Desativa os avisos relacionados à solicitação não segura
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -17,6 +16,13 @@ def download_zip(url_to_check, headers, extract_folder):
 
         # Extrai o nome do arquivo do URL
         filename = url_to_check.split("/")[-1]
+
+        # Gera um nome de arquivo único para evitar substituições
+        base_name, extension = os.path.splitext(filename)
+        count = 1
+        while os.path.exists(os.path.join(extract_folder, filename)):
+            filename = f"{base_name}_{count}{extension}"
+            count += 1
 
         # Define o caminho local para salvar o arquivo ZIP
         local_path = os.path.join(extract_folder, filename)
@@ -39,84 +45,56 @@ def download_zip(url_to_check, headers, extract_folder):
         print(f"Erro na requisição para {url_to_check}: {e}")
         return None
 
-def extract_links(url_to_check, headers, keyword="Dados_abertos_Nao_Previdenciario"):
-    try:
-        response = requests.get(url_to_check, headers=headers, verify=False)
-        response.raise_for_status()  # Verifica se houve algum erro na resposta
-    except requests.exceptions.RequestException as e:
-        print(f"Falha na requisição para {url_to_check}: {e}")
-        return []
+def get_zip_urls(base_url, headers, folder):
+    url_to_check = urljoin(base_url, folder)
+    response = requests.get(url_to_check, headers=headers, verify=False)
+    response.raise_for_status()  # Verifica se houve algum erro na resposta
 
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'html.parser')
-        links = []
+    soup = BeautifulSoup(response.text, 'html.parser')
+    zip_urls = []
 
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            if keyword in href:
-                links.append(urljoin(url_to_check, href))
+    # Padrões desejados na nomenclatura dos arquivos ZIP
+    desired_patterns = [
+        r"Dados_abertos_Nao_Previdenciario\.zip",
+        r"Dados_abertos_Nao_Previdenciario[^/]+\.zip",  # Trata erros de digitação
+    ]
 
-        return links
-    else:
-        return []
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        for pattern in desired_patterns:
+            if re.search(pattern, href) and "Portal_da_Cidadania_Tributaria" not in href:
+                zip_urls.append(urljoin(url_to_check, href))
 
-def read_excel_to_dict(file_path):
-    # Utiliza pandas para ler o arquivo Excel e retorna um dicionário
-    df = pd.read_excel(file_path)
-    return df.to_dict(orient='records')
+    return zip_urls
+
+def get_trimestre_folders(base_url, headers):
+    response = requests.get(base_url, headers=headers, verify=False)
+    response.raise_for_status()  # Verifica se houve algum erro na resposta
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    trimestre_folders = [a['href'] for a in soup.find_all('a', href=True) if a['href'].endswith('/')]
+
+    return trimestre_folders
 
 if __name__ == "__main__":
     with open('config.json') as f:
         dados_arquivo = json.load(f)
 
     base_url = dados_arquivo['url']
-    url_list = [base_url]
     headers = dados_arquivo['headers']
-    extract_folder = dados_arquivo['extract_folder']
 
-    try:
-        while True:
-            novas_pastas = set()
+    # Caminho para a área de trabalho do usuário
+    desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
 
-            for url_to_check in url_list:
-                novas_pastas.update(extract_links(url_to_check, headers))
+    # Pasta onde os arquivos serão salvos na área de trabalho
+    extract_folder = os.path.join(desktop_path, 'Automação Web Scrapping', 'Downloads')
 
-            links_adicionados = novas_pastas - set(url_list)
+    trimestre_folders = get_trimestre_folders(base_url, headers)
 
-            if links_adicionados:
-                print("Novas pastas adicionadas:")
-                for link_adicionado in links_adicionados:
-                    url_list.append(link_adicionado)
-                    print(link_adicionado)
+    for trimestre_folder in trimestre_folders:
+        zip_urls = get_zip_urls(base_url, headers, trimestre_folder)
 
-            for url_to_check in links_adicionados:
-                try:
-                    zip_path = download_zip(url_to_check, headers, extract_folder)
+        for zip_url in zip_urls:
+            download_zip(zip_url, headers, extract_folder)
 
-                    if zip_path:
-                        # Cria um dicionário consolidado para armazenar todos os dados
-                        consolidated_data = {}
-
-                        # Lê todas as planilhas Excel dentro do arquivo ZIP
-                        with pd.ExcelFile(zip_path) as xls:
-                            for sheet_name in xls.sheet_names:
-                                df_data = read_excel_to_dict(xls.parse(sheet_name))
-
-                                # Adiciona os dados ao dicionário consolidado
-                                if sheet_name not in consolidated_data:
-                                    consolidated_data[sheet_name] = []
-
-                                consolidated_data[sheet_name].extend(df_data)
-
-                        # Imprime o dicionário consolidado
-                        print("Dicionário Consolidado:")
-                        print(consolidated_data)
-
-                except requests.exceptions.RequestException as e:
-                    print(f"Erro na requisição: {e}")
-
-            # Aguardar antes da próxima verificação (por exemplo, 1 hora)
-            time.sleep(3600)
-
-    except KeyboardInterrupt:
-        print("Script interrompido manualmente.")
+    print("Downloads concluídos. Arquivos salvos em 'Automação Web Scrapping/Downloads' na área de trabalho.")
