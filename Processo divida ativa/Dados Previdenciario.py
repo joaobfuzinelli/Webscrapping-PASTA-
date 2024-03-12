@@ -1,39 +1,72 @@
-import zipfile
-import pandas as pd
 import os
-import json
+import shutil
+import pandas as pd
+from zipfile import ZipFile
+from rarfile import RarFile
+from pathlib import Path
 
-with open('config.json') as f:
-    dados_arquivo = json.load(f)
 
-# Nome do arquivo zip a ser lido
-zip_filename  = dados_arquivo['zip_filename']
+def obter_caminho_pasta():
+    caminho_pasta = input("Digite o caminho da pasta contendo os arquivos ZIP e RAR: ").strip()
+    return Path(caminho_pasta)
 
-# Pasta de destino para extrair o conteúdo
-extract_folder = dados_arquivo['extract_folder']
+def extrair_zip_ou_rar(arquivo, pasta_destino):
+    try:
+        if arquivo.suffix == ".zip":
+            with ZipFile(arquivo, 'r') as zip_ref:
+                zip_ref.extractall(pasta_destino)
+        elif arquivo.suffix == ".rar":
+            with RarFile(arquivo, 'r') as rar_ref:
+                rar_ref.extractall(pasta_destino)
+        print(f"Arquivo {arquivo.name} extraído para {pasta_destino}")
+    except Exception as e:
+        print(f"Erro ao extrair {arquivo.name}: {e}")
 
-# Garante que a pasta de extração exista ou cria se não existir
-os.makedirs(extract_folder, exist_ok=True)
+def processar_arquivos_zip_ou_rar(pasta_origem, pasta_destino):
+    for arquivo in pasta_origem.iterdir():
+        if arquivo.is_file() and arquivo.suffix in (".zip", ".rar"):
+            extrair_zip_ou_rar(arquivo, pasta_destino)
 
-def extract_and_save_excel(zip_filename, extract_folder):
-    with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
-        # Obtém uma lista de nomes de arquivos dentro do zip
-        file_names = zip_ref.namelist()
+def processar_arquivos_excel(pasta):
+    dataframes = []
+    for arquivo_excel in pasta.rglob("*.xls*"):
+        try:
+            df = pd.read_excel(arquivo_excel)
+            dataframes.append(df)
+            print(f"Arquivo Excel lido: {arquivo_excel}")
+            print(f"Número de linhas: {len(df)}")
+            print(f"Colunas: {df.columns.tolist()}")
+        except Exception as e:
+            print(f"Erro ao ler {arquivo_excel}: {e}")
 
-        for file_name in file_names:
-            # Extrai cada arquivo para a pasta de destino
-            zip_ref.extract(file_name, extract_folder)
+    if dataframes:
+        df_consolidado = pd.concat(dataframes, ignore_index=True)
+        return df_consolidado
+    else:
+        return None
 
-            # Verifica se o arquivo é um arquivo Excel (.xlsx)
-            if file_name.endswith('.xlsx'):
-                # Lê o arquivo Excel usando pandas
-                excel_df = pd.read_excel(os.path.join(extract_folder, file_name))
+def main():
+    caminho_pasta = obter_caminho_pasta()
+    pasta_temporaria = caminho_pasta / "Extrair/Conteudo/temp"
 
-                # Salva as informações (ou realiza o processamento desejado)
-                save_path = os.path.join("Caminho/Para/Salvar", f"{file_name.replace('.xlsx', '.csv')}")
-                excel_df.to_csv(save_path, index=False, encoding='utf-8')
+    # Cria a pasta temporária se não existir
+    pasta_temporaria.mkdir(parents=True, exist_ok=True)
 
-                print(f"Conteúdo do arquivo Excel {file_name} salvo como CSV em {save_path}")
+    try:
+        processar_arquivos_zip_ou_rar(caminho_pasta, pasta_temporaria)
 
-# Chama a função para extrair e salvar o conteúdo Excel
-extract_and_save_excel(zip_filename, extract_folder)
+        df_consolidado = processar_arquivos_excel(pasta_temporaria)
+
+        if df_consolidado is not None:
+            # Agora você pode trabalhar com o DataFrame consolidado
+            # (df_consolidado) como desejar.
+            # Aqui, por exemplo, estou mostrando as primeiras linhas:
+            print("Dicionário Consolidado:")
+            print(df_consolidado.to_dict())
+    finally:
+        # Remova a pasta temporária após o processamento
+        shutil.rmtree(pasta_temporaria, ignore_errors=True)
+        print(f"Pasta temporária {pasta_temporaria} removida com sucesso.")
+
+if __name__ == "__main__":
+    main()
