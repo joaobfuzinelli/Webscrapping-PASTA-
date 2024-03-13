@@ -5,7 +5,6 @@ from zipfile import ZipFile
 from rarfile import RarFile
 from pathlib import Path
 
-
 def obter_caminho_pasta():
     caminho_pasta = input("Digite o caminho da pasta contendo os arquivos ZIP e RAR: ").strip()
     return Path(caminho_pasta)
@@ -62,11 +61,10 @@ def main():
             # (df_consolidado) como desejar.
             # Aqui, por exemplo, estou mostrando as primeiras linhas:
             print("Dicionário Consolidado:")
-            print(df_consolidado.to_dict())
+            print(df_consolidado.head())
     finally:
-        # Remova a pasta temporária após o processamento
-        shutil.rmtree(pasta_temporaria, ignore_errors=True)
-        print(f"Pasta temporária {pasta_temporaria} removida com sucesso.")
+        # Adicione uma mensagem informando que a pasta temporária não será removida
+        print("A pasta temporária não será removida após o processamento.")
 
 if __name__ == "__main__":
     main()
